@@ -780,3 +780,6 @@ Source和Sink：简单的可理解为参照对象是Spring Cloud Stream自身，
 配置了分组就会实现重启后，继续消费mq服务端未消费的消息
 
 # Sleuth 分布式请求链路追踪
+
+# Cloud Alibaba
+
