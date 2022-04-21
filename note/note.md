@@ -129,9 +129,15 @@ KV存储：Key、Value的存储方式
 
 
 
+//查看版本
+
 consul --version
 
+//启动consul
+
 consul agent -dev
+
+http://localhost:8500
 
 # 三个注册中心异同点
 
@@ -783,3 +789,186 @@ Source和Sink：简单的可理解为参照对象是Spring Cloud Stream自身，
 
 # Cloud Alibaba
 
+eureka、ribbon、feign、zuul、config  5大神兽
+
+## Nacos
+
+一个更易于构建云原生应用的动态服务发现、配置管理和服务管理平台。
+
+Nacos就是注册中心+配置中心的组合
+
+
+
+各注册中心比较
+
+| 服务注册与发现框架 | CAP模型 | 控制台管理 | 社区活跃度        |
+| ------------------ | ------- | ---------- | ----------------- |
+| Eureka             | AP      | 支持       | 低（2.x版本闭源） |
+| Zookeeper          | CP      | 不支持     | 中                |
+| Consul             | CP      | 支持       | 高                |
+| Nacos              | AP/CP   | 支持       | 高                |
+
+Nacos与其他注册中心特性对比
+
+|                 | Nacos                      | Eureka      | Consul            | CoreDNS | Zookeeper   |
+| --------------- | -------------------------- | ----------- | ----------------- | ------- | ----------- |
+| 一致性协议      | CP+AP                      | AP          | CP                | /       | CP          |
+| 健康检查        | TCP/HTTP/MySQL/Client Beat | Client Beat | TCP/HTTP/gRPC/Cmd | /       | Client Beat |
+| 负载均衡        | 权重/DSL/metadata/CMDB     | Ribbon      | Fabio             | RR      | /           |
+| 雪崩保护        | 支持                       | 支持        | 不支持            | 不支持  | 不支持      |
+| 自动注销实例    | 支持                       | 支持        | 不支持            | 不支持  | 支持        |
+| 访问协议        | HTTP/DNS/UDP               | HTTP        | HTTP/DNS          | DNS     | TCP         |
+| 监听支持        | 支持                       | 支持        | 支持              | 不支持  | 支持        |
+| 多数据中心      | 支持                       | 支持        | 支持              | 不支持  | 不支持      |
+| 跨注册中心      | 支持                       | 不支持      | 支持              | 不支持  | 不支持      |
+| SpringCloud集成 | 支持                       | 支持        | 支持              | 不支持  | 不支持      |
+| Dubbo集成       | 支持                       | 不支持      | 不支持            | 不支持  | 支持        |
+| K8s集成         | 支持                       | 不支持      | 支持              | 支持    | 不支持      |
+
+何时选择使用何种模式：
+
+一般来说：
+
+如果不需要存储服务级别的信息且服务实例是通过nacos-client注册，并能够保持心跳上报，那么就可以选择AP模式。当前主流的服务如Spring Cloud 和Dubbo服务，都适用于AP模式，AP模式为了服务的可能性而减弱了一致性，因此AP模式下只支持注册临时实例。
+
+
+
+如果需要在服务级别编辑或者存储配置信息，那么CP是必须，K8s服务和DNS服务则适用于CP模式。
+
+CP模式下则支持注册持久化实例，此时则是以Raft协议为集群运行模式，该模式下注册实例之前必须先注册服务，如果服务不存在，则会返回错误。
+
+curl -X PUT ‘$NACOS_SERVER:8848/nacos/v1/ns/operator/switches?entry=serverMode&value=CP’
+
+post命令切换
+
+**==Nacos支持AP和CP模式的切换==**
+
+
+
+三种部署模式：
+
+单机模式
+
+集群模式
+
+多集群模式
+
+
+
+### 配置中心
+
+Namespace+Group+Data ID
+
+默认情况
+
+Namespace=public      Group=DEFAULT_GROUP,  默认Cluster是DEFAULT
+
+data id就是service
+
+### Data ID配置
+
+nacos-config-client-dev.yml
+
+nacos-config-client-test.yml
+
+### Nacos集群和持久化配置(重要)
+
+nginx+nacos+mysql(主从)
+
+
+
+**nacos持久化配置解释**
+
+采用了集中式存储的方式来支持集群化部署,目前只支持MySQL的存储.
+
+nacos默认自带的是嵌入式数据库derby
+
+官网要求,配置说明
+
+application.properties
+
+```properties
+spring.datasource.platform=mysql
+
+### Count of DB:
+db.num=1
+
+### Connect URL of DB:
+db.url.0=jdbc:mysql://127.0.0.1:3306/nacos?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useUnicode=true&useSSL=false&serverTimezone=UTC
+db.user.0=nacos
+db.password.0=nacos
+```
+
+Linux版Nacos集群+mysql生产环境的迁移和测试
+
+预计需要：1个nginx+3个nacos注册中心+1个mysql
+
+
+
+### nacos集群配置：
+
+修改startup.sh版（适用于1.2.x版本）
+
+一、数据库表的初始化
+
+二、修改application.properties文件（修改nacos持久化模式，以及mysql连接信息）
+
+三、hostname -i   查看本地ip
+
+修改cluster.conf文件
+
+```conf
+192.168.73.99:3333
+192.168.73.99:4444
+192.168.73.99:5555
+```
+
+四、编辑Nacos的启动脚本startup.sh,使它能够接受不同的启动端口
+
+```properties
+57行
+while getopts “：m:f:s:p:” opt
+
+p) 
+ PORT=$OPTARG;; 
+
+nohup $JAVA -Dserver.port=${PORT} ${JAVA_OPT} nacos.nacos >> ${BASE_DIR}/logs/start.out 2>&1 &
+```
+
+五、nginx配置(nginx.conf)
+
+```config
+upstream cluster{
+	server 127.0.0.1:3333;
+	server 127.0.0.1:4444;
+	server 127.0.0.1:5555;
+}
+```
+
+ribbon底层使用拦截器来拦截请求，进行匹配映射成真实地址来实现远程调用，当服务列表发生变更时，ribbon底层会单开一个定时任务去拉取最新的服务列表。nacos也会采用udp方式给客户端推送最新的服务列表。采用双重保险机制
+
+动态服务感知
+
+openFeign底层使用代理方式来拼接接口的真实请求地址。
+
+ps -ef|grep nacos|grep -v grep|wc -l
+
+TODO :   nacos集群由于电脑太渣，故没法实现
+
+## sentinel熔断限流
+
+面向云原生微服务的流量控制、熔断降级组件
+
+hystrix
+
+1、需要我们程序员自己手工搭建监控平台
+
+2、没有一套web界面可以给我们进行更加细粒度化的配置 流控、速率控制、服务熔断、服务降级。。。。
+
+
+
+Sentinel：
+
+1、单独一个组件，可以独立出来。
+
+2、直接界面化的细粒度统一配置
