@@ -1104,3 +1104,180 @@ Data ID为yml配置文件中的id
 - controlBehavior：流控效果，0表示快速失败，1表示Warm Up，2表示排队等待
 - clusterMode：是否集群
 
+## Seata处理分布式事务
+
+解决全局的数据一致性问题
+
+seata是一款开源的分布式事务解决方案，致力于在微服务架构下提供高性能和简单易用的分布式事物服务。Seata将为用户提供了AT、TCC、SAGA、和XA事物模式，为用户打造一站式的分布式解决方案。
+
+XID：全局唯一的事物ID
+
+- TC（事物协调者）：事物协调器，维护全局和分支事物的运行状态，负责协调并驱动全局事务提交或回滚
+- TM（事物管理器）：控制全局事务的边界，负责开启一个全局事务，并最终发起全局提交或全局回滚的决议
+- RM（资源管理器）：控制分支事物，负责分支注册、状态汇报，并接收事物协调器的指令，驱动分支（本地）事物的提交和回滚
+
+
+
+**处理过程**：
+
+1. TM向TC申请开启一个全局事务，全局事务创建成功并生成一个全局唯一的XID；
+2. XID在微服务调用链路的上下文中传播；
+3. RM向TC注册分支事物，将其纳入XID对应全局事务的管辖；
+4. TM向TC发起针对XID的全局提交或回滚决议
+5. TC调度XID下管辖的全部分支事物完成提交或回滚请求。
+
+### seata安装配置：
+
+1、修改conf目录下的file.conf文件
+
+- 自定义事物组名称（service）
+  - vgroup_mapping.my_test_tx_group = "fsp_tx_group"
+- 事物日志存储模式为db（store）
+  - mode = “db”
+- 数据库连接信息（database）
+  - url = “jdbc:mysql://127.0.0.1:3306/seata”
+  - user = "root"
+  - password = "root"
+
+
+
+2、数据库db_store.sql
+
+3、registry.conf文件配置
+
+type = “nacos”
+
+---以下配置取决于上面的type类型
+
+serverAddr = “localhost:8848”     
+
+### 实战
+
+1、建库
+
+```sql
+create database seata_order;
+use seata_order;
+create table t_order(
+    `id` BIGINT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `user_id` BIGINT(11) DEFAULT NULL COMMENT '用户id',
+    `product_id` BIGINT(11) DEFAULT NULL COMMENT '产品id',
+    `count` INT(11) DEFAULT NULL COMMENT '数量',
+    `money` DECIMAL(11,0) DEFAULT NULL COMMENT '金额',
+    `status` INT(1) DEFAULT NULL COMMENT '订单状态：0-创建中；1-已完结'
+)ENGINE=INNODB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8;
+
+insert into t_order values(51,1,1,10,100,1);
+insert into t_order values(52,1,1,10,100,1);
+insert into t_order values(53,1,1,10,100,1);
+insert into t_order values(54,1,1,10,100,0);
+---库存表
+create database seata_storage;
+use seata_storage;
+create table t_storage(
+    `id` BIGINT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `product_id` BIGINT(11) DEFAULT NULL COMMENT '产品id',
+    `total` INT(11) DEFAULT NULL COMMENT '总库存',
+    `used` INT(11) DEFAULT NULL COMMENT '已用库存',
+    `residue` INT(11) DEFAULT NULL COMMENT '剩余库存'
+)ENGINE=INNODB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;
+
+insert into seata_storage.t_storage values(1,1,100,0,100);
+
+----用户表
+create database seata_account;
+create table t_account(
+    `id` BIGINT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT 'id',
+    `user_id` BIGINT(11) DEFAULT NULL COMMENT '用户id',
+    `total` DECIMAL(10,0) DEFAULT NULL COMMENT '总额度',
+    `used` DECIMAL(10,0) DEFAULT NULL COMMENT '已用余额',
+    `residue` DECIMAL(10,0) DEFAULT '0' COMMENT '剩余可用额度'
+)ENGINE=INNODB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;
+
+insert into t_account values(1,1,1000,0,1000);
+```
+
+2、回滚日志表(每个分布式事务对应的库中都要建此表)
+
+conf目录下的db_undo_log.sql
+
+demo:
+
+localhost:2001/order/create?userId=1&productId=1&count=10&money=100
+
+
+
+Simple Extensible Autonomous Transaction Architecture
+
+简单可扩展自治事务框架
+
+AT------阿里云GTS   
+
+
+
+统一的XID（全局事务id）
+
+TC：事物协调者（seata服务器）
+
+TM：事物控制者（事物发起方）
+
+RM：资源管理器（事物参与方）
+
+
+
+### 分布式事务执行流程
+
+TM开启分布式事务（TM向TC注册全局事务记录）；
+
+按业务场景，编排数据库、服务等事务内资源（RM向TC汇报资源准备状态）；
+
+TM结束分布式事务，事务一阶段结束（TM通知TC提交/回滚分布式事务）；
+
+TC汇总事务信息，决定分布式事务是提交还是回滚；
+
+TC通知所有RM提交/回滚资源，事务二阶段结束。
+
+
+
+AT模式
+
+- 一阶段：业务数据和回滚日志记录在同一个本地事务中提交，释放本地锁和连接资源。
+- 二阶段：
+  - 提交异步化，非常快速地完成。
+  - 回滚通过一阶段的回滚日志进行反向补偿
+
+
+
+一阶段：
+
+在一阶段，Seata会拦截“业务SQL”
+
+1、解析SQL语义，找到“业务SQL”要更新的业务数据，在业务数据被更新前，将其保存成“before image”
+
+2、执行“业务SQL” 更新业务数据，在业务数据更新之后，
+
+3、其保存成“after image”，最后生成行锁。
+
+以上操作全部在一个数据库事务内完成，这样保证了一阶段操作的院子性。
+
+![](image/微信图片_20220427171154.png)
+
+二阶段如是顺利提交的话，
+
+因为“业务SQL”在一阶段已经提交至数据库，所以Seata框架只需将一阶段保存的快照数据和行锁删掉，完成数据清理即可。
+
+![](image/微信图片_20220427171447.png)
+
+二阶段回滚：
+
+而极端如果是回滚的话，Seata就需要回滚一阶段已经执行的“业务SQL”，还原业务数据。
+
+回滚方式便是用“before image”还原业务数据；但在还原前要首先要校验脏写，对比“数据库当前业务数据”和“after image”，
+
+如果两份数据完全一致就说明没有脏写，可以还原业务数据，如果不一致就说明有脏写，出现脏写就需要转人工处理。
+
+![](image/微信图片_20220427171546.png)
+
+
+
+Spring AOP思想+回退反写机制
