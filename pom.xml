@@ -41,6 +41,7 @@
         <module>seata-account-service2003</module>
         <module>seata-storage-service2002</module>
         <module>snowflake</module>
+        <module>kafka</module>
     </modules>
     <packaging>pom</packaging>
 
